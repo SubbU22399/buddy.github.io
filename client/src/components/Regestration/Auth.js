@@ -3,11 +3,13 @@ import React, { useState } from "react";
 const Auth = () => {
   const [activeTab, setActiveTab] = useState("Login");
   return (
-    <div className="w-[400px] h-[400px]">
-      <div className="w-[400px] h-[400px] mt-10">
-        <div className="flex justify-between items-center mb-4 ">
-          <button className="px-4 py-2 " onClick={() => setActiveTab("Login")}>
-            Login
+    <div className=" flex  justify-center items-center w-[400px] h-[400px] mr-50">
+      <div className="">
+        <div className="flex justify-between items-center mb-4 w-full ">
+          <button className={' px-4 py-2 ' + (activeTab === "Login" ? "bg-blue-500 text-white" : "bg-white text-blue-500")}
+            onClick={() => setActiveTab("Login")}
+          >
+          Login
           </button>
           <button
             className="px-4 py-2"
@@ -18,7 +20,7 @@ const Auth = () => {
         </div>
         <div>
           {activeTab === "Login" && (
-            <div className="flex relative">
+            <div className="">
               <input
                 type="text"
                 placeholder="Email"
