@@ -1,12 +1,8 @@
 import "./App.css";
-import Body from "./components/Body";
+import Chat from "./components/Chat";
 
 function App() {
-  return (
-    <div className="Body">
-      <Body />
-    </div>
-  );
+  return <Chat />;
 }
 
 export default App;
