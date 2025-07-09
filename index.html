@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Buddy</title>
+    <title>Multi-User Chat Application Buddy</title>
     <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -19,27 +19,48 @@
             const [input, setInput] = useState('');
             const [username, setUsername] = useState('');
             const [ws, setWs] = useState(null);
+            const [error, setError] = useState('');
+            const [isConnected, setIsConnected] = useState(false);
 
             useEffect(() => {
-                // Connect to WebSocket server (using a public WebSocket echo server for demo)
-                const websocket = new WebSocket('wss://echo.websocket.org');
+                // Generate a random username if none is set
+                if (!username) {
+                    setUsername(`User${Math.floor(Math.random() * 1000)}`);
+                }
+
+                // Connect to WebSocket server
+                const websocket = new WebSocket('wss://your-websocket-server.com');
                 setWs(websocket);
 
                 websocket.onopen = () => {
-                    console.log('Connected to WebSocket');
+                    setIsConnected(true);
+                    setError('');
+                    // Send username to server for identification
+                    websocket.send(JSON.stringify({ type: 'join', username }));
                 };
 
                 websocket.onmessage = (event) => {
-                    const message = {
-                        username: username || 'Anonymous',
-                        text: event.data,
-                        timestamp: new Date().toLocaleTimeString(),
-                    };
-                    setMessages((prev) => [...prev, message]);
+                    try {
+                        const data = JSON.parse(event.data);
+                        const message = {
+                            username: data.username,
+                            text: data.text,
+                            timestamp: new Date().toLocaleTimeString(),
+                        };
+                        setMessages((prev) => [...prev, message]);
+                    } catch (err) {
+                        setError('Error processing message');
+                    }
+                };
+
+                websocket.onerror = () => {
+                    setError('Connection error. Please try again.');
+                    setIsConnected(false);
                 };
 
                 websocket.onclose = () => {
-                    console.log('Disconnected from WebSocket');
+                    setError('Disconnected from server.');
+                    setIsConnected(false);
                 };
 
                 return () => {
@@ -49,31 +70,46 @@
 
             const sendMessage = (e) => {
                 e.preventDefault();
-                if (input.trim() && ws) {
-                    ws.send(input);
+                if (input.trim() && ws && isConnected) {
+                    const message = { type: 'message', username, text: input };
+                    ws.send(JSON.stringify(message));
                     setInput('');
+                } else if (!isConnected) {
+                    setError('Not connected to the server.');
                 }
             };
 
             return (
                 <div className="flex flex-col h-screen bg-gray-100">
-                    <div className="p-4 bg-blue-600 text-white">
-                        <h1 className="text-2xl font-bold">Chat App</h1>
+                    <div className="p-4 bg-blue-600 text-white flex justify-between items-center">
+                        <h1 className="text-2xl font-bold">Multi-User Chat</h1>
+                        <span className="text-sm">{isConnected ? 'Connected' : 'Disconnected'}</span>
                     </div>
+                    {error && (
+                        <div className="p-2 bg-red-100 text-red-700 text-center">{error}</div>
+                    )}
                     <div className="p-4">
                         <input
                             type="text"
                             placeholder="Enter your username"
                             value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            className="w-full p-2 mb-4 border rounded"
+                            onChange={(e) => setUsername(e.target.value || `User${Math.floor(Math.random() * 1000)}`)}
+                            className="w-full p-2 mb-4 border rounded focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            disabled={isConnected}
                         />
                     </div>
                     <div className="flex-1 p-4 overflow-y-auto">
                         {messages.map((msg, index) => (
-                            <div key={index} className="mb-2">
-                                <span className="font-bold">{msg.username}</span>
-                                <span className="text-gray-500 text-sm ml-2">{msg.timestamp}</span>
+                            <div
+                                key={index}
+                                className={`mb-2 p-2 rounded ${
+                                    msg.username === username ? 'bg-blue-100 ml-4' : 'bg-gray-200 mr-4'
+                                }`}
+                            >
+                                <div className="flex justify-between">
+                                    <span className="font-bold">{msg.username}</span>
+                                    <span className="text-gray-500 text-sm">{msg.timestamp}</span>
+                                </div>
                                 <p className="text-gray-800">{msg.text}</p>
                             </div>
                         ))}
@@ -85,11 +121,13 @@
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 placeholder="Type a message..."
-                                className="flex-1 p-2 border rounded-l"
+                                className="flex-1 p-2 border rounded-l focus:outline-none focus:ring-2 focus:ring-blue-600"
+                                disabled={!isConnected}
                             />
                             <button
                                 type="submit"
-                                className="bg-blue-600 text-white p-2 rounded-r hover:bg-blue-700"
+                                className="bg-blue-600 text-white p-2 rounded-r hover:bg-blue-700 disabled:bg-gray-400"
+                                disabled={!isConnected}
                             >
                                 Send
                             </button>
