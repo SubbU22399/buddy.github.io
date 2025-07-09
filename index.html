@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-User Chat Application Buddy</title>
+    <title>Multi-User Chat Application</title>
     <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <base href="%BASE_HREF%">
 </head>
 <body>
     <div id="root"></div>
@@ -28,14 +29,13 @@
                     setUsername(`User${Math.floor(Math.random() * 1000)}`);
                 }
 
-                // Connect to WebSocket server
-                const websocket = new WebSocket('https://subbu22399.github.io/buddy.github.io/');
+                // Connect to WebSocket server (replace with your WebSocket server URL)
+                const websocket = new WebSocket('wss://your-websocket-server.com');
                 setWs(websocket);
 
                 websocket.onopen = () => {
                     setIsConnected(true);
                     setError('');
-                    // Send username to server for identification
                     websocket.send(JSON.stringify({ type: 'join', username }));
                 };
 
