@@ -1,143 +1,340 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-User Chat Application</title>
-    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <base href="https://subbu22399.github.io/buddy.github.io/">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-Time Chat Application</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React and ReactDOM CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel for JSX -->
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.20.15/babel.min.js"></script>
+  <!-- Socket.IO CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.5/dist/socket.io.min.js"></script>
+  <!-- Lodash for debouncing -->
+  <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script>
 </head>
-<body>
-    <div id="root"></div>
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+<body class="bg-gray-100 h-screen flex items-center justify-center font-sans">
+  <div id="root"></div>
 
-        const ChatApp = () => {
-            const [messages, setMessages] = useState([]);
-            const [input, setInput] = useState('');
-            const [username, setUsername] = useState('');
-            const [ws, setWs] = useState(null);
-            const [error, setError] = useState('');
-            const [isConnected, setIsConnected] = useState(false);
+  <script type="text/babel">
+    // Sanitize user input to prevent XSS
+    const sanitizeInput = (input) => {
+      const div = document.createElement('div');
+      div.textContent = input;
+      return div.innerHTML;
+    };
 
-            useEffect(() => {
-                // Generate a random username if none is set
-                if (!username) {
-                    setUsername(`User${Math.floor(Math.random() * 1000)}`);
-                }
+    // Message Component
+    const Message = ({ message, isOwnMessage }) => {
+      const timestamp = new Date(message.timestamp).toLocaleTimeString();
+      return (
+        <div 
+          className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'} mb-2`} 
+          role="listitem" 
+          aria-label={`Message from ${message.username} at ${timestamp}`}
+        >
+          <div className={`max-w-xs md:max-w-md p-3 rounded-lg ${isOwnMessage ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
+            <p className="text-sm font-bold">{sanitizeInput(message.username)}</p>
+            <p>{sanitizeInput(message.text)}</p>
+            <p className="text-xs text-gray-400">
+              {timestamp} {message.read ? '✓✓' : '✓'}
+            </p>
+          </div>
+        </div>
+      );
+    };
 
-                // Connect to WebSocket server (replace with your WebSocket server URL)
-                const websocket = new WebSocket('https://devserver-main--rainbow-faloodeh-a8353e.netlify.app'); // server address
-                setWs(websocket);
+    // User List Component
+    const UserList = ({ users, onSelectUser, currentUser }) => {
+      return (
+        <div className="w-1/4 bg-gray-50 p-4 border-r overflow-y-auto">
+          <h2 className="text-lg font-bold mb-2">Online Users</h2>
+          <ul role="list" aria-label="Online users">
+            {users.map((user) => (
+              <li
+                key={user}
+                className={`p-2 cursor-pointer hover:bg-gray-200 rounded ${user === currentUser ? 'font-bold' : ''}`}
+                onClick={() => onSelectUser(user)}
+                role="button"
+                tabIndex={0}
+                onKeyPress={(e) => e.key === 'Enter' && onSelectUser(user)}
+                aria-label={`Select user ${user}`}
+              >
+                {sanitizeInput(user)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+    };
 
-                websocket.onopen = () => {
-                    setIsConnected(true);
-                    setError('');
-                    websocket.send(JSON.stringify({ type: 'join', username }));
-                };
+    // Chat Application Component
+    const ChatApp = () => {
+      const [username, setUsername] = React.useState('');
+      const [inputUsername, setInputUsername] = React.useState('');
+      const [message, setMessage] = React.useState('');
+      const [messages, setMessages] = React.useState([]);
+      const [users, setUsers] = React.useState([]);
+      const [selectedUser, setSelectedUser] = React.useState(null);
+      const [error, setError] = React.useState('');
+      const [isConnected, setIsConnected] = React.useState(false);
+      const [typingUsers, setTypingUsers] = React.useState([]);
+      const messagesEndRef = React.useRef(null);
+      const socketRef = React.useRef(null);
 
-                websocket.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        const message = {
-                            username: data.username,
-                            text: data.text,
-                            timestamp: new Date().toLocaleTimeString(),
-                        };
-                        setMessages((prev) => [...prev, message]);
-                    } catch (err) {
-                        setError('Error processing message');
-                    }
-                };
+      // Scroll to bottom of messages
+      const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      };
 
-                websocket.onerror = () => {
-                    setError('Connection error. Please try again.');
-                    setIsConnected(false);
-                };
+      // Debounced typing notification
+      const notifyTyping = React.useCallback(
+        _.debounce(() => {
+          if (username && isConnected) {
+            socketRef.current.emit('typing', username);
+          }
+        }, 500),
+        [username, isConnected]
+      );
 
-                websocket.onclose = () => {
-                    setError('Disconnected from server.');
-                    setIsConnected(false);
-                };
+      // Connect to WebSocket server
+      React.useEffect(() => {
+        socketRef.current = io('https://socket-io-chat-example.herokuapp.com/', {
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+        });
 
-                return () => {
-                    websocket.close();
-                };
-            }, [username]);
+        socketRef.current.on('connect', () => {
+          setIsConnected(true);
+          setError('');
+        });
 
-            const sendMessage = (e) => {
-                e.preventDefault();
-                if (input.trim() && ws && isConnected) {
-                    const message = { type: 'message', username, text: input };
-                    ws.send(JSON.stringify(message));
-                    setInput('');
-                } else if (!isConnected) {
-                    setError('Not connected to the server.');
-                }
-            };
+        socketRef.current.on('disconnect', () => {
+          setIsConnected(false);
+          setError('Disconnected. Attempting to reconnect...');
+        });
 
-            return (
-                <div className="flex flex-col h-screen bg-gray-100">
-                    <div className="p-4 bg-blue-600 text-white flex justify-between items-center">
-                        <h1 className="text-2xl font-bold">Multi-User Chat</h1>
-                        <span className="text-sm">{isConnected ? 'Connected' : 'Disconnected'}</span>
-                    </div>
-                    {error && (
-                        <div className="p-2 bg-red-100 text-red-700 text-center">{error}</div>
-                    )}
-                    <div className="p-4">
-                        <input
-                            type="text"
-                            placeholder="Enter your username"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value || `User${Math.floor(Math.random() * 1000)}`)}
-                            className="w-full p-2 mb-4 border rounded focus:outline-none focus:ring-2 focus:ring-blue-600"
-                            disabled={isConnected}
-                        />
-                    </div>
-                    <div className="flex-1 p-4 overflow-y-auto">
-                        {messages.map((msg, index) => (
-                            <div
-                                key={index}
-                                className={`mb-2 p-2 rounded ${
-                                    msg.username === username ? 'bg-blue-100 ml-4' : 'bg-gray-200 mr-4'
-                                }`}
-                            >
-                                <div className="flex justify-between">
-                                    <span className="font-bold">{msg.username}</span>
-                                    <span className="text-gray-500 text-sm">{msg.timestamp}</span>
-                                </div>
-                                <p className="text-gray-800">{msg.text}</p>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="p-4 bg-white">
-                        <form onSubmit={sendMessage} className="flex">
-                            <input
-                                type="text"
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                placeholder="Type a message..."
-                                className="flex-1 p-2 border rounded-l focus:outline-none focus:ring-2 focus:ring-blue-600"
-                                disabled={!isConnected}
-                            />
-                            <button
-                                type="submit"
-                                className="bg-blue-600 text-white p-2 rounded-r hover:bg-blue-700 disabled:bg-gray-400"
-                                disabled={!isConnected}
-                            >
-                                Send
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            );
+        socketRef.current.on('message', (message) => {
+          setMessages((prev) => [...prev, { ...message, read: false }]);
+          if (message.username !== username) {
+            socketRef.current.emit('read', message.id);
+          }
+        });
+
+        socketRef.current.on('system', (message) => {
+          setMessages((prev) => [...prev, { ...message, system: true }]);
+        });
+
+        socketRef.current.on('username_taken', () => {
+          setError('Username already taken. Please choose another.');
+        });
+
+        socketRef.current.on('users', (userList) => {
+          setUsers(userList);
+        });
+
+        socketRef.current.on('typing', (user) => {
+          setTypingUsers((prev) => {
+            if (!prev.includes(user) && user !== username) {
+              return [...prev, user];
+            }
+            return prev;
+          });
+          setTimeout(() => {
+            setTypingUsers((prev) => prev.filter((u) => u !== user));
+          }, 2000);
+        });
+
+        socketRef.current.on('read', (messageId) => {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === messageId ? { ...msg, read: true } : msg
+            )
+          );
+        });
+
+        return () => {
+          socketRef.current.disconnect();
         };
+      }, []);
 
-        ReactDOM.render(<ChatApp />, document.getElementById('root'));
-    </script>
+      // Scroll to bottom when messages update
+      React.useEffect(() => {
+        scrollToBottom();
+      }, [messages]);
+
+      // Handle username submission
+      const handleUsernameSubmit = () => {
+        if (inputUsername.trim() === '') {
+          setError('Please enter a username');
+          return;
+        }
+        const sanitizedUsername = sanitizeInput(inputUsername);
+        setUsername(sanitizedUsername);
+        socketRef.current.emit('join', sanitizedUsername);
+        setError('');
+      };
+
+      // Handle message submission
+      const handleSendMessage = () => {
+        if (message.trim() === '') {
+          setError('Message cannot be empty');
+          return;
+        }
+        if (!isConnected) {
+          setError('Not connected to the server');
+          return;
+        }
+        const sanitizedMessage = sanitizeInput(message);
+        const messageData = {
+          username,
+          text: sanitizedMessage,
+          timestamp: new Date().toISOString(),
+          id: Date.now().toString(),
+          to: selectedUser || null, // For private messages
+        };
+        socketRef.current.emit('message', messageData);
+        setMessages((prev) => [...prev, { ...messageData, read: false }]);
+        setMessage('');
+        setError('');
+      };
+
+      // Handle clear chat
+      const handleClearChat = () => {
+        setMessages([]);
+      };
+
+      // Handle user selection for private messages
+      const handleSelectUser = (user) => {
+        setSelectedUser(user === selectedUser ? null : user);
+      };
+
+      // Handle key press for accessibility
+      const handleKeyPress = (e) => {
+        if (e.key === 'Enter') {
+          if (!username) {
+            handleUsernameSubmit();
+          } else {
+            handleSendMessage();
+          }
+        }
+      };
+
+      // Handle input change with typing notification
+      const handleMessageInput = (e) => {
+        setMessage(e.target.value);
+        notifyTyping();
+      };
+
+      return (
+        <div className="w-full max-w-4xl bg-white shadow-xl rounded-lg overflow-hidden flex flex-col md:flex-row h-[80vh]" role="application" aria-label="Chat Application">
+          {/* Header */}
+          <div className="bg-blue-600 text-white p-4">
+            <h1 className="text-xl font-bold">Enhanced Real-Time Chat</h1>
+            <p className="text-sm">{isConnected ? 'Connected' : 'Disconnected'}</p>
+          </div>
+
+          {/* Error Message */}
+          {error && (
+            <div className="bg-red-100 text-red-700 p-2 text-center" role="alert">
+              {error}
+            </div>
+          )}
+
+          {/* Username Prompt */}
+          {!username && (
+            <div className="p-4 flex-1 flex flex-col justify-center">
+              <input
+                type="text"
+                value={inputUsername}
+                onChange={(e) => setInputUsername(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Enter your username"
+                className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2"
+                aria-label="Username input"
+              />
+              <button
+                onClick={handleUsernameSubmit}
+                className="w-full bg-blue-500 text-white p-2 rounded-lg hover:bg-blue-600"
+                aria-label="Join chat"
+              >
+                Join Chat
+              </button>
+            </div>
+          )}
+
+          {/* Chat Interface */}
+          {username && (
+            <div className="flex flex-1">
+              {/* User List */}
+              <UserList
+                users={users}
+                onSelectUser={handleSelectUser}
+                currentUser={username}
+              />
+
+              {/* Chat Area */}
+              <div className="flex-1 flex flex-col">
+                <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
+                  {messages
+                    .filter((msg) => !msg.to || msg.to === username || msg.username === username)
+                    .map((msg, index) => (
+                      <Message
+                        key={index}
+                        message={msg}
+                        isOwnMessage={msg.username === username && !msg.system}
+                      />
+                    ))}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Typing Indicator */}
+                {typingUsers.length > 0 && (
+                  <div className="p-2 text-sm text-gray-500">
+                    {typingUsers.join(', ')} {typingUsers.length > 1 ? 'are' : 'is'} typing...
+                  </div>
+                )}
+
+                {/* Input Area */}
+                <div className="p-4 border-t flex space-x-2">
+                  <input
+                    type="text"
+                    value={message}
+                    onChange={handleMessageInput}
+                    onKeyPress={handleKeyPress}
+                    placeholder={selectedUser ? `Message ${selectedUser}...` : 'Type a message...'}
+                    className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    aria-label="Message input"
+                  />
+                  <button
+                    onClick={handleSendMessage}
+                    className="bg-blue-500 text-white p-2 rounded-lg hover:bg-blue-600"
+                    aria-label="Send message"
+                  >
+                    Send
+                  </button>
+                  <button
+                    onClick={handleClearChat}
+                    className="bg-gray-500 text-white p-2 rounded-lg hover:bg-gray-600"
+                    aria-label="Clear chat"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // Render the app
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<ChatApp />);
+  </script>
 </body>
 </html>
